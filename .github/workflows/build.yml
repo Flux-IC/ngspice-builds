@@ -41,6 +41,7 @@ jobs:
             unzip
             tar
             git
+            p7zip
 
       - name: Resolve version
         run: |
@@ -94,7 +95,7 @@ jobs:
           # Create version file
           echo "${NGSPICE_VERSION}" > package/Spice64/VERSION
           cd package
-          7z a -tzip ../../ngspice-${NGSPICE_VERSION}-win64.zip Spice64/
+          7za a -tzip ../../ngspice-${NGSPICE_VERSION}-win64.zip Spice64/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
