@@ -85,11 +85,32 @@ jobs:
           make install DESTDIR=$(pwd)/install
           # Create the Spice64 layout Flux expects
           mkdir -p package/Spice64/bin
+          mkdir -p package/Spice64/lib/ngspice
           mkdir -p package/Spice64/share
+          # Main binary
           cp install/mingw64/bin/ngspice.exe package/Spice64/bin/ngspice_con.exe
+          # XSpice code model libraries (.cm) — required by sky130 PDK
+          cp install/mingw64/lib/ngspice/*.cm package/Spice64/lib/ngspice/ 2>/dev/null || true
+          # Spinit (tells ngspice where to find .cm files)
           cp -r install/mingw64/share/ngspice package/Spice64/share/ 2>/dev/null || true
+          # Patch spinit to use relative paths instead of /mingw64
+          SPINIT=$(find package -name "spinit" -o -name ".spiceinit" 2>/dev/null | head -1)
+          if [ -n "$SPINIT" ]; then
+            sed -i 's|/mingw64/lib/ngspice|lib/ngspice|g' "$SPINIT"
+          fi
+          # Also create a spinit next to the binary for portable mode
+          cat > package/Spice64/bin/spinit << 'SPINIT_EOF'
+          * ngspice init file (Flux EDA build)
+          codemodel ../lib/ngspice/spice2poly.cm
+          codemodel ../lib/ngspice/analog.cm
+          codemodel ../lib/ngspice/digital.cm
+          codemodel ../lib/ngspice/xtradev.cm
+          codemodel ../lib/ngspice/xtraevt.cm
+          codemodel ../lib/ngspice/table.cm
+          SPINIT_EOF
+          sed -i 's/^          //' package/Spice64/bin/spinit
           # Copy required DLLs
-          for dll in libgomp-1.dll libwinpthread-1.dll; do
+          for dll in libgomp-1.dll libwinpthread-1.dll libgcc_s_seh-1.dll libstdc++-6.dll; do
             cp /mingw64/bin/$dll package/Spice64/bin/ 2>/dev/null || true
           done
           # Create version file
