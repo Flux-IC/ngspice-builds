@@ -40,6 +40,7 @@ jobs:
             wget
             unzip
             tar
+            git
 
       - name: Resolve version
         run: |
@@ -56,27 +57,14 @@ jobs:
 
       - name: Download ngspice source
         run: |
-          wget -q "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz/download" \
-            -O ngspice-${NGSPICE_VERSION}.tar.gz \
-            --user-agent="Mozilla/5.0" \
-            --max-redirect=10 || true
-          # If wget fails (SourceForge redirect), try alternative
-          if ! file ngspice-${NGSPICE_VERSION}.tar.gz | grep -q gzip; then
-            echo "Direct download failed, trying git clone..."
-            git clone --depth=1 --branch ngspice-${NGSPICE_VERSION} \
-              https://git.code.sf.net/p/ngspice/ngspice ngspice-src
-          else
-            tar xzf ngspice-${NGSPICE_VERSION}.tar.gz
-            mv ngspice-${NGSPICE_VERSION} ngspice-src
-          fi
+          echo "Cloning ngspice-${NGSPICE_VERSION} from SourceForge git..."
+          git clone --depth=1 --branch ngspice-${NGSPICE_VERSION} \
+            https://git.code.sf.net/p/ngspice/ngspice ngspice-src
 
       - name: Configure and build
         run: |
           cd ngspice-src
-          # If cloned from git, need to run autogen
-          if [ -f autogen.sh ]; then
-            ./autogen.sh
-          fi
+          ./autogen.sh
           mkdir -p release && cd release
           ../configure \
             --prefix=/mingw64 \
@@ -140,24 +128,14 @@ jobs:
 
       - name: Download ngspice source
         run: |
-          wget -q "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz/download" \
-            -O ngspice-${NGSPICE_VERSION}.tar.gz \
-            --user-agent="Mozilla/5.0" \
-            --max-redirect=10 || true
-          if ! file ngspice-${NGSPICE_VERSION}.tar.gz | grep -q gzip; then
-            git clone --depth=1 --branch ngspice-${NGSPICE_VERSION} \
-              https://git.code.sf.net/p/ngspice/ngspice ngspice-src
-          else
-            tar xzf ngspice-${NGSPICE_VERSION}.tar.gz
-            mv ngspice-${NGSPICE_VERSION} ngspice-src
-          fi
+          echo "Cloning ngspice-${NGSPICE_VERSION} from SourceForge git..."
+          git clone --depth=1 --branch ngspice-${NGSPICE_VERSION} \
+            https://git.code.sf.net/p/ngspice/ngspice ngspice-src
 
       - name: Configure and build
         run: |
           cd ngspice-src
-          if [ -f autogen.sh ]; then
-            ./autogen.sh
-          fi
+          ./autogen.sh
           mkdir -p release && cd release
           ../configure \
             --prefix=/usr/local \
