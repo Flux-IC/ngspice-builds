@@ -1,0 +1,223 @@
+name: Build ngspice
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ngspice_version:
+        description: 'ngspice version to build (e.g. 44)'
+        required: true
+        default: '44'
+
+env:
+  # Default version — overridden by tag (v44 → 44) or manual input
+  NGSPICE_VERSION: '44'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-gcc-fortran
+            make
+            autoconf
+            automake
+            libtool
+            bison
+            flex
+            wget
+            unzip
+            tar
+
+      - name: Resolve version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"  # strip leading v
+          elif [[ -n "${{ github.event.inputs.ngspice_version }}" ]]; then
+            VER="${{ github.event.inputs.ngspice_version }}"
+          else
+            VER="${{ env.NGSPICE_VERSION }}"
+          fi
+          echo "NGSPICE_VERSION=$VER" >> $GITHUB_ENV
+          echo "Building ngspice-$VER"
+
+      - name: Download ngspice source
+        run: |
+          wget -q "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz/download" \
+            -O ngspice-${NGSPICE_VERSION}.tar.gz \
+            --user-agent="Mozilla/5.0" \
+            --max-redirect=10 || true
+          # If wget fails (SourceForge redirect), try alternative
+          if ! file ngspice-${NGSPICE_VERSION}.tar.gz | grep -q gzip; then
+            echo "Direct download failed, trying git clone..."
+            git clone --depth=1 --branch ngspice-${NGSPICE_VERSION} \
+              https://git.code.sf.net/p/ngspice/ngspice ngspice-src
+          else
+            tar xzf ngspice-${NGSPICE_VERSION}.tar.gz
+            mv ngspice-${NGSPICE_VERSION} ngspice-src
+          fi
+
+      - name: Configure and build
+        run: |
+          cd ngspice-src
+          # If cloned from git, need to run autogen
+          if [ -f autogen.sh ]; then
+            ./autogen.sh
+          fi
+          mkdir -p release && cd release
+          ../configure \
+            --prefix=/mingw64 \
+            --with-wingui \
+            --enable-xspice \
+            --enable-cider \
+            --enable-openmp \
+            --enable-pss \
+            --disable-debug \
+            CFLAGS="-O2 -DHAS_WINGUI" \
+            LDFLAGS="-static-libgcc -static-libstdc++"
+          make -j$(nproc)
+
+      - name: Package
+        run: |
+          cd ngspice-src/release
+          make install DESTDIR=$(pwd)/install
+          # Create the Spice64 layout Flux expects
+          mkdir -p package/Spice64/bin
+          mkdir -p package/Spice64/share
+          cp install/mingw64/bin/ngspice.exe package/Spice64/bin/ngspice_con.exe
+          cp -r install/mingw64/share/ngspice package/Spice64/share/ 2>/dev/null || true
+          # Copy required DLLs
+          for dll in libgomp-1.dll libwinpthread-1.dll; do
+            cp /mingw64/bin/$dll package/Spice64/bin/ 2>/dev/null || true
+          done
+          # Create version file
+          echo "${NGSPICE_VERSION}" > package/Spice64/VERSION
+          cd package
+          7z a -tzip ../../ngspice-${NGSPICE_VERSION}-win64.zip Spice64/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngspice-${{ env.NGSPICE_VERSION }}-win64
+          path: ngspice-src/ngspice-${{ env.NGSPICE_VERSION }}-win64.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake \
+            libtool bison flex libreadline-dev wget
+
+      - name: Resolve version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"
+          elif [[ -n "${{ github.event.inputs.ngspice_version }}" ]]; then
+            VER="${{ github.event.inputs.ngspice_version }}"
+          else
+            VER="${{ env.NGSPICE_VERSION }}"
+          fi
+          echo "NGSPICE_VERSION=$VER" >> $GITHUB_ENV
+          echo "Building ngspice-$VER"
+
+      - name: Download ngspice source
+        run: |
+          wget -q "https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz/download" \
+            -O ngspice-${NGSPICE_VERSION}.tar.gz \
+            --user-agent="Mozilla/5.0" \
+            --max-redirect=10 || true
+          if ! file ngspice-${NGSPICE_VERSION}.tar.gz | grep -q gzip; then
+            git clone --depth=1 --branch ngspice-${NGSPICE_VERSION} \
+              https://git.code.sf.net/p/ngspice/ngspice ngspice-src
+          else
+            tar xzf ngspice-${NGSPICE_VERSION}.tar.gz
+            mv ngspice-${NGSPICE_VERSION} ngspice-src
+          fi
+
+      - name: Configure and build
+        run: |
+          cd ngspice-src
+          if [ -f autogen.sh ]; then
+            ./autogen.sh
+          fi
+          mkdir -p release && cd release
+          ../configure \
+            --prefix=/usr/local \
+            --enable-xspice \
+            --enable-cider \
+            --enable-openmp \
+            --enable-pss \
+            --disable-debug \
+            CFLAGS="-O2"
+          make -j$(nproc)
+
+      - name: Package
+        run: |
+          cd ngspice-src/release
+          make install DESTDIR=$(pwd)/install
+          mkdir -p package/bin package/share
+          cp install/usr/local/bin/ngspice package/bin/
+          cp -r install/usr/local/share/ngspice package/share/ 2>/dev/null || true
+          echo "${NGSPICE_VERSION}" > package/VERSION
+          cd package
+          tar czf ../../ngspice-${NGSPICE_VERSION}-linux64.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngspice-${{ env.NGSPICE_VERSION }}-linux64
+          path: ngspice-src/ngspice-${{ env.NGSPICE_VERSION }}-linux64.tar.gz
+
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Resolve version
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          echo "NGSPICE_VERSION=$VER" >> $GITHUB_ENV
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ngspice ${{ env.NGSPICE_VERSION }}"
+          body: |
+            Pre-built ngspice ${{ env.NGSPICE_VERSION }} binaries for Flux EDA.
+
+            Compiled with full BSIM4 model binning support for SkyWater SKY130 PDK.
+
+            **Install in Flux:**
+            ```
+            python tools/ngspice_update.py --install ${{ env.NGSPICE_VERSION }}
+            ```
+
+            Or download and extract manually to `~/.flux/ngspice/`.
+          files: |
+            artifacts/ngspice-${{ env.NGSPICE_VERSION }}-win64/ngspice-${{ env.NGSPICE_VERSION }}-win64.zip
+            artifacts/ngspice-${{ env.NGSPICE_VERSION }}-linux64/ngspice-${{ env.NGSPICE_VERSION }}-linux64.tar.gz
